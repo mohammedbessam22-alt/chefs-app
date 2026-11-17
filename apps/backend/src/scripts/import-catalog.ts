@@ -5,6 +5,7 @@ import {
   createInventoryLevelsWorkflow,
   createProductCategoriesWorkflow,
   createProductsWorkflow,
+  deleteInventoryLevelsWorkflow,
   updateInventoryLevelsWorkflow,
   updateProductsWorkflow,
   uploadFilesWorkflow,
@@ -133,9 +134,12 @@ async function syncStock(ctx: Ctx, inventoryItemId: string, row: CatalogRow) {
   // each product lives at exactly one location: drop levels elsewhere
   const stale = data.filter((l: any) => l.location_id !== targetLoc)
   if (stale.length) {
-    const inventory: any = ctx.container.resolve(Modules.INVENTORY)
     const removable = stale.filter((l: any) => !Number(l.reserved_quantity))
-    if (removable.length) await inventory.deleteInventoryLevels(removable.map((l: any) => l.id))
+    if (removable.length) {
+      await deleteInventoryLevelsWorkflow(ctx.container).run({
+        input: { id: removable.map((l: any) => l.id), force: true },
+      })
+    }
     if (removable.length < stale.length) {
       ctx.logger.warn(`${row.handle}: stock at another warehouse has reservations, left in place`)
     }
@@ -284,13 +288,27 @@ export default async function importCatalog({ container, args }: ExecArgs) {
     return
   }
 
-  const records: Record<string, string>[] = parse(fs.readFileSync(csvPath, "utf8"), {
-    columns: true,
-    bom: true,
-    skip_empty_lines: true,
-    trim: true,
-    relax_column_count: true,
-  })
+  let records: { record: Record<string, string>; line: number }[]
+  try {
+    const parsed: any[] = parse(fs.readFileSync(csvPath, "utf8"), {
+      columns: true,
+      bom: true,
+      skip_empty_lines: true,
+      trim: true,
+      relax_column_count: true,
+      info: true,
+      raw: true,
+    })
+    // info.lines is the line where the record ends; subtract embedded newlines to get its first line
+    records = parsed.map((p) => ({
+      record: p.record,
+      line: p.info.lines - (String(p.raw).replace(/^[\r\n]+|[\r\n]+$/g, "").split("\n").length - 1),
+    }))
+  } catch (e: any) {
+    logger.error(`Cannot read CSV "${csvPath}": ${String(e?.message ?? e).split("\n")[0]}`)
+    process.exitCode = 1
+    return
+  }
 
   const ctx: Ctx = {
     container,
@@ -312,9 +330,9 @@ export default async function importCatalog({ container, args }: ExecArgs) {
   const seen = new Set<string>()
 
   for (let i = 0; i < records.length; i++) {
-    const rowNo = i + 2 // header is line 1
+    const rowNo = records[i].line
     try {
-      const row = parseCatalogRow(records[i], rowNo)
+      const row = parseCatalogRow(records[i].record, rowNo)
       if (seen.has(row.handle)) throw new Error(`row ${rowNo}: handle (duplicate in file)`)
       seen.add(row.handle)
       const outcome = await importRow(ctx, row, rowNo)
