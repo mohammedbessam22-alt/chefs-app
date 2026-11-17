@@ -1,4 +1,12 @@
-import { blankTitleWithDescription, changedLocales, localesToKeep, mergeAfterSave, type Drafts } from "../translation-drafts"
+import {
+  blankTitleWithDescription,
+  changedLocales,
+  initialState,
+  translationsReducer as reduce,
+  type Action,
+  type Drafts,
+  type State,
+} from "../translation-drafts"
 
 const d = (o: Partial<Drafts> = {}): Drafts => ({
   ckb: { title: "", description: "" },
@@ -32,37 +40,127 @@ describe("blankTitleWithDescription", () => {
   })
 })
 
-describe("mergeAfterSave", () => {
-  const server = d({ ckb: { title: "K", description: "" }, tk: { title: "old", description: "" } })
-  const drafts = d({ ckb: { title: "K", description: "" }, tk: { title: "new tk", description: "d" }, en: { title: "E", description: "" } })
+const run = (s: State, ...actions: Action[]) => actions.reduce(reduce, s)
+const P = "prod_1"
+const SERVER = d({ ckb: { title: "K", description: "kd" }, tk: { title: "T", description: "" } })
 
-  it("keeps the draft for failed locales and takes server value for the rest", () => {
-    // en saved (server now has it), tk failed
-    const srv = d({ ...server, en: { title: "E", description: "" } })
-    const merged = mergeAfterSave(srv, drafts, ["tk"])
-    expect(merged.tk).toEqual({ title: "new tk", description: "d" })
-    expect(merged.en).toEqual({ title: "E", description: "" })
-    expect(merged.ckb).toEqual(srv.ckb)
-  })
-  it("leaves exactly the failed locales as changed against the new snapshot", () => {
-    const srv = d({ ...server, en: { title: "E", description: "" } })
-    expect(changedLocales(srv, mergeAfterSave(srv, drafts, ["tk"]))).toEqual(["tk"])
-  })
-  it("equals the server state when nothing failed", () => {
-    expect(mergeAfterSave(server, drafts, [])).toEqual(server)
-  })
-})
+/** Initial load done for P with SERVER. */
+const loaded = () =>
+  run(initialState(P), { type: "LOAD_START", productId: P, reqId: 1 }, { type: "LOAD_OK", productId: P, reqId: 1, server: SERVER })
 
-describe("localesToKeep", () => {
-  const snap = d({ ckb: { title: "K", description: "" } })
-  const now = d({ ckb: { title: "K2", description: "" }, tk: { title: "T", description: "" } })
-  it("keeps every locale differing from the snapshot (retry case)", () => {
-    expect(localesToKeep(snap, now, [])).toEqual(["ckb", "tk"])
+describe("translationsReducer", () => {
+  it("starts in loading state with nothing editable", () => {
+    const s = initialState(P)
+    expect(s.status).toBe("loading")
+    expect(reduce(s, { type: "EDIT", locale: "en", field: "title", value: "x" })).toBe(s)
+    expect(reduce(s, { type: "SAVE_START", productId: P })).toBe(s)
   })
-  it("excludes locales that were just saved", () => {
-    expect(localesToKeep(snap, now, ["ckb"])).toEqual(["tk"])
+
+  it("initial load fills drafts from the server (empty drafts are not kept)", () => {
+    const s = loaded()
+    expect(s.status).toBe("ready")
+    expect(s.snapshot).toEqual(SERVER)
+    expect(s.drafts).toEqual(SERVER)
+    expect(changedLocales(s.snapshot, s.drafts)).toEqual([])
   })
-  it("is empty when nothing differs", () => {
-    expect(localesToKeep(snap, snap, [])).toEqual([])
+
+  it("an edit shows up in changedLocales", () => {
+    const s = run(loaded(), { type: "EDIT", locale: "en", field: "title", value: "E" })
+    expect(changedLocales(s.snapshot, s.drafts)).toEqual(["en"])
+  })
+
+  it("load failure keeps state, blocks edits/save, and Retry fills from server", () => {
+    let s = run(initialState(P), { type: "LOAD_START", productId: P, reqId: 1 }, { type: "LOAD_FAIL", productId: P, reqId: 1 })
+    expect(s.status).toBe("error")
+    expect(reduce(s, { type: "EDIT", locale: "en", field: "title", value: "x" })).toBe(s)
+    expect(reduce(s, { type: "SAVE_START", productId: P })).toBe(s)
+    s = run(s, { type: "LOAD_START", productId: P, reqId: 2 }, { type: "LOAD_OK", productId: P, reqId: 2, server: SERVER })
+    expect(s.drafts).toEqual(SERVER)
+  })
+
+  it("partial save failure: saved locales take server value, failed keep the draft", () => {
+    let s = run(
+      loaded(),
+      { type: "EDIT", locale: "en", field: "title", value: "E" },
+      { type: "EDIT", locale: "tk", field: "title", value: "T2" },
+      { type: "SAVE_START", productId: P },
+      { type: "SAVE_DONE", productId: P, saved: ["tk"], failed: ["en"], reqId: 2 }
+    )
+    expect(s.status).toBe("loading")
+    expect(s.saveError).toEqual({ saved: ["tk"], failed: ["en"] })
+    const server2 = d({ ...SERVER, tk: { title: "T2", description: "" } })
+    s = run(s, { type: "LOAD_OK", productId: P, reqId: 2, server: server2 })
+    expect(s.drafts.tk).toEqual(server2.tk)
+    expect(s.drafts.en).toEqual({ title: "E", description: "" })
+    expect(changedLocales(s.snapshot, s.drafts)).toEqual(["en"])
+  })
+
+  it("untouched locales take the new server value after refetch (no stale drafts)", () => {
+    const server2 = d({ ...SERVER, ckb: { title: "K-other-admin", description: "" } })
+    const s = run(
+      loaded(),
+      { type: "EDIT", locale: "en", field: "title", value: "E" },
+      { type: "SAVE_START", productId: P },
+      { type: "SAVE_DONE", productId: P, saved: ["en"], failed: [], reqId: 2 },
+      { type: "LOAD_OK", productId: P, reqId: 2, server: { ...server2, en: { title: "E", description: "" } } }
+    )
+    expect(s.drafts.ckb).toEqual(server2.ckb)
+    expect(changedLocales(s.snapshot, s.drafts)).toEqual([])
+  })
+
+  it("post-save refetch failure keeps drafts; Retry keeps failed edits and takes server for saved", () => {
+    let s = run(
+      loaded(),
+      { type: "EDIT", locale: "en", field: "title", value: "E" },
+      { type: "EDIT", locale: "tk", field: "title", value: "T2" },
+      { type: "SAVE_START", productId: P },
+      { type: "SAVE_DONE", productId: P, saved: ["tk"], failed: ["en"], reqId: 2 },
+      { type: "LOAD_FAIL", productId: P, reqId: 2 }
+    )
+    expect(s.status).toBe("error")
+    expect(s.drafts.en.title).toBe("E")
+    expect(s.drafts.tk.title).toBe("T2")
+    expect(s.snapshot).toEqual(SERVER)
+    const server2 = d({ ...SERVER, tk: { title: "T2", description: "" } })
+    s = run(s, { type: "LOAD_START", productId: P, reqId: 3 }, { type: "LOAD_OK", productId: P, reqId: 3, server: server2 })
+    expect(s.status).toBe("ready")
+    expect(s.drafts.en.title).toBe("E")
+    expect(s.drafts.tk).toEqual(server2.tk)
+    expect(changedLocales(s.snapshot, s.drafts)).toEqual(["en"])
+  })
+
+  it("ignores LOAD_OK / LOAD_FAIL / SAVE_DONE for an old product after RESET", () => {
+    const s = run(loaded(), { type: "RESET", productId: "prod_2" }, { type: "LOAD_START", productId: "prod_2", reqId: 5 })
+    expect(s.drafts).toEqual(d())
+    expect(reduce(s, { type: "LOAD_OK", productId: P, reqId: 5, server: SERVER })).toBe(s)
+    expect(reduce(s, { type: "LOAD_FAIL", productId: P, reqId: 5 })).toBe(s)
+    expect(reduce(s, { type: "SAVE_DONE", productId: P, saved: ["en"], failed: [], reqId: 6 })).toBe(s)
+    const ok = reduce(s, { type: "LOAD_OK", productId: "prod_2", reqId: 5, server: SERVER })
+    expect(ok.drafts).toEqual(SERVER)
+  })
+
+  it("ignores a superseded request for the same product", () => {
+    const s = run(initialState(P), { type: "LOAD_START", productId: P, reqId: 1 }, { type: "LOAD_START", productId: P, reqId: 2 })
+    expect(reduce(s, { type: "LOAD_OK", productId: P, reqId: 1, server: SERVER })).toBe(s)
+    expect(reduce(s, { type: "LOAD_FAIL", productId: P, reqId: 1 })).toBe(s)
+  })
+
+  it("applying the same action twice (StrictMode) is harmless", () => {
+    const actions: Action[] = [
+      { type: "RESET", productId: P },
+      { type: "LOAD_START", productId: P, reqId: 1 },
+      { type: "LOAD_OK", productId: P, reqId: 1, server: SERVER },
+      { type: "EDIT", locale: "en", field: "title", value: "E" },
+      { type: "SAVE_START", productId: P },
+      { type: "SAVE_DONE", productId: P, saved: [], failed: ["en"], reqId: 2 },
+      { type: "LOAD_OK", productId: P, reqId: 2, server: SERVER },
+    ]
+    const once = actions.reduce(reduce, initialState(P))
+    const twice = actions.reduce((s, a) => reduce(reduce(s, a), a), initialState(P))
+    expect(twice).toEqual(once)
+    expect(once.drafts.en.title).toBe("E")
+    // reducer is pure: same input state + action gives equal output
+    const base = loaded()
+    expect(reduce(base, actions[3])).toEqual(reduce(base, actions[3]))
   })
 })

@@ -1,13 +1,13 @@
 import { defineWidgetConfig } from "@medusajs/admin-sdk"
 import { Button, Container, Heading, Input, Label, Text, toast } from "@medusajs/ui"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useReducer, useRef } from "react"
 import {
   blankTitleWithDescription,
   changedLocales,
-  localesToKeep,
-  mergeAfterSave,
+  emptyDrafts,
+  initialState,
+  translationsReducer,
   type Draft,
-  type Drafts,
   type Locale,
 } from "../lib/translation-drafts"
 
@@ -17,12 +17,6 @@ const LOCALES: { code: Locale; label: string; dir: "rtl" | "ltr" }[] = [
   { code: "en", label: "English", dir: "ltr" },
 ]
 
-const empty = (): Drafts => ({
-  ckb: { title: "", description: "" },
-  tk: { title: "", description: "" },
-  en: { title: "", description: "" },
-})
-
 const request = async (url: string, init?: RequestInit) => {
   const res = await fetch(url, { credentials: "include", headers: { "Content-Type": "application/json" }, ...init })
   if (!res.ok) throw new Error(`${res.status}`)
@@ -30,92 +24,77 @@ const request = async (url: string, init?: RequestInit) => {
 }
 
 const ProductTranslations = ({ data }: { data: { id: string } }) => {
-  const [drafts, setDrafts] = useState<Drafts>(empty())
-  const [snapshot, setSnapshot] = useState<Drafts>(empty())
-  const [loaded, setLoaded] = useState(false)
-  const [loadError, setLoadError] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const [state, dispatch] = useReducer(translationsReducer, data.id, initialState)
+  // Token generator only; the reducer holds the accepted reqId and ignores any other response.
+  const nextReqId = useRef(0)
 
-  // Guards against stale responses (product changed, unmounted, or a newer load started).
-  const loadSeq = useRef(0)
+  const fetchInto = useCallback(async (productId: string, reqId: number) => {
+    try {
+      const r: { translations: { locale: Locale; title: string; description: string | null }[] } = await request(
+        `/admin/chefs/translations?entity_type=product&entity_id=${encodeURIComponent(productId)}`
+      )
+      const server = emptyDrafts()
+      for (const t of r.translations) server[t.locale] = { title: t.title, description: t.description ?? "" }
+      dispatch({ type: "LOAD_OK", productId, reqId, server })
+    } catch {
+      dispatch({ type: "LOAD_FAIL", productId, reqId })
+    }
+  }, [])
 
-  const snapshotRef = useRef<Drafts>(empty())
-  const productIdRef = useRef(data.id)
-  productIdRef.current = data.id
-
-  // Unsaved edits survive a reload: every locale differing from the snapshot except `justSaved`.
   const load = useCallback(
-    async (justSaved: Locale[] = []) => {
-      const seq = ++loadSeq.current
-      setLoaded(false)
-      setLoadError(false)
-      try {
-        const r: { translations: { locale: Locale; title: string; description: string | null }[] } = await request(
-          `/admin/chefs/translations?entity_type=product&entity_id=${encodeURIComponent(data.id)}`
-        )
-        if (seq !== loadSeq.current) return
-        const server = empty()
-        for (const t of r.translations) server[t.locale] = { title: t.title, description: t.description ?? "" }
-        setDrafts((d) => mergeAfterSave(server, d, localesToKeep(snapshotRef.current, d, justSaved)))
-        snapshotRef.current = server
-        setSnapshot(server)
-        setLoaded(true)
-      } catch {
-        if (seq === loadSeq.current) setLoadError(true)
-      }
+    (productId: string) => {
+      const reqId = ++nextReqId.current
+      dispatch({ type: "LOAD_START", productId, reqId })
+      fetchInto(productId, reqId)
     },
-    [data.id]
+    [fetchInto]
   )
 
   useEffect(() => {
-    snapshotRef.current = empty()
-    setDrafts(empty())
-    setSnapshot(empty())
-    load()
-    return () => {
-      loadSeq.current++
-    }
-  }, [load])
+    dispatch({ type: "RESET", productId: data.id })
+    load(data.id)
+  }, [data.id, load])
 
-  const set = (code: Locale, field: keyof Draft, value: string) =>
-    setDrafts((d) => ({ ...d, [code]: { ...d[code], [field]: value } }))
-
+  const { status, snapshot, drafts, saveError, productId } = state
+  const ready = status === "ready"
   const blank = blankTitleWithDescription(drafts)
   const changed = changedLocales(snapshot, drafts)
-  const canSave = loaded && !saving && changed.length > 0 && blank.length === 0
+  const canSave = ready && productId === data.id && changed.length > 0 && blank.length === 0
+
+  const set = (locale: Locale, field: keyof Draft, value: string) => dispatch({ type: "EDIT", locale, field, value })
 
   const save = async () => {
     if (!canSave) return
-    setSaving(true)
+    const toSave = changed.map((code) => ({ code, draft: drafts[code] }))
+    dispatch({ type: "SAVE_START", productId })
     const saved: Locale[] = []
-    const savedFor = data.id
-    try {
-      for (const code of changed) {
+    const failed: Locale[] = []
+    for (const { code, draft } of toSave) {
+      try {
         await request("/admin/chefs/translations", {
           method: "PUT",
           body: JSON.stringify({
             entity_type: "product",
-            entity_id: data.id,
+            entity_id: productId,
             locale: code,
-            title: drafts[code].title,
-            description: drafts[code].description,
+            title: draft.title,
+            description: draft.description,
           }),
         })
         saved.push(code)
+      } catch {
+        failed.push(code)
       }
-      toast.success("Translations saved")
-    } catch {
-      toast.error(
-        `Could not save all translations. Saved: ${saved.length ? saved.join(", ") : "none"}. Failed: ${changed
-          .filter((c) => !saved.includes(c))
-          .join(", ")}`
-      )
-    } finally {
-      setSaving(false)
-      // refresh snapshot; unsaved edits (failed locales) are kept so Save retries them.
-      // Skip if the product changed meanwhile: the new product has its own load.
-      if (productIdRef.current === savedFor) await load(saved)
     }
+    if (failed.length) {
+      toast.error(`Could not save all translations. Saved: ${saved.join(", ") || "none"}. Failed: ${failed.join(", ")}`)
+    } else {
+      toast.success("Translations saved")
+    }
+    // Refetch; the reducer ignores both actions if the product changed meanwhile.
+    const reqId = ++nextReqId.current
+    dispatch({ type: "SAVE_DONE", productId, saved, failed, reqId })
+    fetchInto(productId, reqId)
   }
 
   return (
@@ -124,14 +103,19 @@ const ProductTranslations = ({ data }: { data: { id: string } }) => {
         <div>
           <Heading level="h2">Translations</Heading>
           <Text size="small" className="text-ui-fg-subtle">
-            Arabic is the base language. Leave a title empty to remove that translation.
+            Arabic is the base language. Clear a title (and description) to remove that translation.
           </Text>
-          {loadError && (
+          {status === "error" && (
             <Text size="small" className="text-ui-fg-error">
-              Could not load translations; saving is disabled.{" "}
-              <button type="button" className="underline" onClick={() => load()}>
+              Could not load translations; editing and saving are disabled.{" "}
+              <button type="button" className="underline" onClick={() => load(productId)}>
                 Retry
               </button>
+            </Text>
+          )}
+          {saveError && (
+            <Text size="small" className="text-ui-fg-error">
+              Saved: {saveError.saved.join(", ") || "none"}. Failed: {saveError.failed.join(", ")}. Save again to retry.
             </Text>
           )}
           {blank.length > 0 && (
@@ -140,7 +124,7 @@ const ProductTranslations = ({ data }: { data: { id: string } }) => {
             </Text>
           )}
         </div>
-        <Button size="small" onClick={save} isLoading={saving} disabled={!canSave}>
+        <Button size="small" onClick={save} isLoading={status === "saving"} disabled={!canSave}>
           Save
         </Button>
       </div>
@@ -148,13 +132,13 @@ const ProductTranslations = ({ data }: { data: { id: string } }) => {
         <div key={code} className="grid grid-cols-2 gap-4 px-6 py-4">
           <div className="flex flex-col gap-1">
             <Label size="small">{label} title</Label>
-            <Input dir={dir} disabled={!loaded || saving} value={drafts[code].title} onChange={(e) => set(code, "title", e.target.value)} />
+            <Input dir={dir} disabled={!ready} value={drafts[code].title} onChange={(e) => set(code, "title", e.target.value)} />
           </div>
           <div className="flex flex-col gap-1">
             <Label size="small">{label} description</Label>
             <Input
               dir={dir}
-              disabled={!loaded || saving}
+              disabled={!ready}
               value={drafts[code].description}
               onChange={(e) => set(code, "description", e.target.value)}
             />
