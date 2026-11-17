@@ -88,6 +88,7 @@ export function tryBegin(set: Set<string>, id: string): boolean {
 
 export function actionErrorMessage(status: number, body: any): string {
   if (status === 409 && body?.message === "invalid_transition") return "This order changed - refresh"
+  if (status === 409 && body?.type === "not_allowed" && typeof body?.message === "string") return `Not allowed: ${body.message}`
   if (status === 0) return "Network problem - check your connection and refresh"
   if (status === 404) return "Order not found - refresh"
   return "Action failed - try again"

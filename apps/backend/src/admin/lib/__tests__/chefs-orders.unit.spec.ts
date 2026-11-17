@@ -70,6 +70,11 @@ describe("actionErrorMessage", () => {
   it("explains 409 invalid_transition", () => {
     expect(actionErrorMessage(409, { message: "invalid_transition" })).toMatch(/changed.*refresh/i)
   })
+  it("shows the server reason for a 409 not_allowed", () => {
+    expect(actionErrorMessage(409, { type: "not_allowed", message: "All fulfillments must be canceled before canceling an order" })).toMatch(
+      /fulfillments must be canceled/
+    )
+  })
   it("explains 404 and falls back", () => {
     expect(actionErrorMessage(404, { message: "order not found" })).toMatch(/not found/i)
     expect(actionErrorMessage(500, {})).toMatch(/failed/i)
