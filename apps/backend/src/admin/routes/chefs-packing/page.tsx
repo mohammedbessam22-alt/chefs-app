@@ -79,6 +79,7 @@ const PackingPage = () => {
         </div>
       )}
 
+      <style>{`@media print { header, nav, aside, [data-print-hide] { display: none !important; } main { padding: 0 !important; } }`}</style>
       <div className="flex flex-wrap items-start gap-4 px-6 py-4">
         {locations.map((loc) => {
           const unassigned = loc.id === "unassigned"

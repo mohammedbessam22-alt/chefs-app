@@ -1,3 +1,5 @@
+import { normalizeIraqiPhone } from "../../lib/phone"
+
 // Pure helpers for the Orders / Packing admin pages (unit-tested).
 export type Confirmation = "awaiting" | "confirmed" | "delivered" | "cancelled"
 export type StaffAction = "confirm" | "deliver" | "cancel"
@@ -54,18 +56,39 @@ export function allowedActions(c: string): StaffAction[] {
 /** True while more rows exist beyond those loaded up to and including this page. */
 export const hasMore = (p: { count: number; offset: number; length: number }): boolean => p.offset + p.length < p.count
 
+/** Link only for a valid Iraqi mobile (9647XXXXXXXXX); malformed phones get no link. */
 export function whatsappUrl(phone: string | null | undefined): string | null {
-  const digits = (phone ?? "").replace(/\D/g, "")
-  return digits ? `https://wa.me/${digits}` : null
+  if (!phone) return null
+  try {
+    return `https://wa.me/${normalizeIraqiPhone(phone)}`
+  } catch {
+    return null
+  }
 }
 
 export function mapsUrl(lat: number | null | undefined, lng: number | null | undefined): string | null {
-  if (lat === null || lat === undefined || lng === null || lng === undefined) return null
+  if (typeof lat !== "number" || typeof lng !== "number" || !Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  if (lat === 0 && lng === 0) return null
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null
   return `https://maps.google.com/?q=${lat},${lng}`
+}
+
+/** If offset is past the last page (rows vanished), return the offset of the last page; else unchanged. */
+export function clampOffset(offset: number, count: number, pageSize: number): number {
+  if (count > 0 && offset >= count) return Math.floor((count - 1) / pageSize) * pageSize
+  return offset
+}
+
+/** Synchronous in-flight guard: returns false if id is already running. Call release() when done. */
+export function tryBegin(set: Set<string>, id: string): boolean {
+  if (set.has(id)) return false
+  set.add(id)
+  return true
 }
 
 export function actionErrorMessage(status: number, body: any): string {
   if (status === 409 && body?.message === "invalid_transition") return "This order changed - refresh"
+  if (status === 0) return "Network problem - check your connection and refresh"
   if (status === 404) return "Order not found - refresh"
   return "Action failed - try again"
 }

@@ -7,6 +7,8 @@ import {
   allowedActions,
   baghdadToday,
   buildOrdersQuery,
+  clampOffset,
+  tryBegin,
   hasMore,
   mapsUrl,
   whatsappUrl,
@@ -41,7 +43,9 @@ const OrdersPage = () => {
   const [loadError, setLoadError] = useState(false)
   const [rounds, setRounds] = useState<string[]>([])
   const [confirmCancel, setConfirmCancel] = useState<OrderRow | null>(null)
-  const [busyId, setBusyId] = useState<string | null>(null)
+  // In-flight action ids: the ref is checked synchronously (blocks double clicks); state drives disabled buttons.
+  const inFlight = useRef(new Set<string>())
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
 
   // Latest query lives in a ref so the 30 s timer always loads the current filters without being re-created.
   const queryRef = useRef("")
@@ -62,6 +66,8 @@ const OrdersPage = () => {
     setLoadError(false)
     setOrders(r.body.orders)
     setCount(r.body.count)
+    // Rows vanished (e.g. cancelled elsewhere) and this page is now past the end: go to the last page.
+    setOffset((o) => clampOffset(o, r.body.count, PAGE_SIZE))
   }, [])
 
   // Reload on filter/page change.
@@ -69,6 +75,8 @@ const OrdersPage = () => {
     setLoading(true)
     load()
   }, [filters, offset, load])
+  // Rows shown belong to the previous query while a reload for changed filters/page is in flight.
+  const rowsStale = loading
 
   // Auto-refresh: only touches the list data, never filters, dialog or paging.
   useEffect(() => {
@@ -88,9 +96,11 @@ const OrdersPage = () => {
   }
 
   const act = async (o: OrderRow, action: StaffAction) => {
-    setBusyId(o.id)
+    if (!tryBegin(inFlight.current, o.id)) return
+    setBusy(new Set(inFlight.current))
     const r = await chefsFetch(`/admin/chefs/orders/${o.id}/${action}`, { method: "POST" })
-    setBusyId(null)
+    inFlight.current.delete(o.id)
+    setBusy(new Set(inFlight.current))
     if (r.ok) toast.success(`Order #${o.display_id}: ${LABELS[action]} done`)
     else toast.error(actionErrorMessage(r.status, r.body))
     load()
@@ -208,7 +218,7 @@ const OrdersPage = () => {
                         key={a}
                         size="small"
                         variant={a === "cancel" ? "danger" : "secondary"}
-                        disabled={busyId === o.id}
+                        disabled={busy.has(o.id) || rowsStale}
                         onClick={() => (a === "cancel" ? setConfirmCancel(o) : act(o, a))}
                       >
                         {LABELS[a]}

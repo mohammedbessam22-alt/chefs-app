@@ -1,4 +1,4 @@
-import { allowedActions, baghdadToday, buildOrdersQuery, buildPackingQuery, hasMore, whatsappUrl, mapsUrl, actionErrorMessage } from "../chefs-orders"
+import { allowedActions, baghdadToday, buildOrdersQuery, buildPackingQuery, hasMore, whatsappUrl, mapsUrl, actionErrorMessage, clampOffset, tryBegin } from "../chefs-orders"
 
 describe("baghdadToday", () => {
   it("uses UTC+3 (late UTC evening is already tomorrow)", () => {
@@ -50,13 +50,19 @@ describe("hasMore", () => {
 describe("links", () => {
   it("builds wa.me with digits only", () => {
     expect(whatsappUrl("+964 770 000 0000")).toBe("https://wa.me/9647700000000")
+    expect(whatsappUrl("07700000000")).toBe("https://wa.me/9647700000000")
+    expect(whatsappUrl("12345")).toBeNull()
+    expect(whatsappUrl("0770")).toBeNull()
     expect(whatsappUrl(null)).toBeNull()
     expect(whatsappUrl("abc")).toBeNull()
   })
   it("builds maps link only when both coordinates exist", () => {
     expect(mapsUrl(35.1, 44.2)).toBe("https://maps.google.com/?q=35.1,44.2")
     expect(mapsUrl(null, 44.2)).toBeNull()
-    expect(mapsUrl(0, 0)).toBe("https://maps.google.com/?q=0,0")
+    expect(mapsUrl(0, 0)).toBeNull()
+    expect(mapsUrl(NaN, 1)).toBeNull()
+    expect(mapsUrl(Infinity, 1)).toBeNull()
+    expect(mapsUrl(95, 1)).toBeNull()
   })
 })
 
@@ -68,4 +74,28 @@ describe("actionErrorMessage", () => {
     expect(actionErrorMessage(404, { message: "order not found" })).toMatch(/not found/i)
     expect(actionErrorMessage(500, {})).toMatch(/failed/i)
   })
+})
+
+describe("clampOffset", () => {
+  it("moves to the last page when past the end", () => {
+    expect(clampOffset(200, 150, 100)).toBe(100)
+    expect(clampOffset(100, 100, 100)).toBe(0)
+    expect(clampOffset(100, 150, 100)).toBe(100)
+    expect(clampOffset(100, 0, 100)).toBe(100)
+  })
+})
+
+describe("tryBegin", () => {
+  it("rejects a second begin until released", () => {
+    const s = new Set<string>()
+    expect(tryBegin(s, "a")).toBe(true)
+    expect(tryBegin(s, "a")).toBe(false)
+    expect(tryBegin(s, "b")).toBe(true)
+    s.delete("a")
+    expect(tryBegin(s, "a")).toBe(true)
+  })
+})
+
+describe("network failure message", () => {
+  it("status 0", () => expect(actionErrorMessage(0, {})).toMatch(/network/i))
 })

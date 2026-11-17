@@ -1,16 +1,29 @@
 import { ExecArgs } from "@medusajs/framework/types"
+import { devScriptRefusal } from "../lib/dev-script-guard"
 
 /**
  * Dev helper: places N guest orders through the STORE API of the running dev server (HTTP).
  * Stock for a throwaway product is created via core workflows in this process (same dev DB).
  *
- *   npx medusa exec ./src/scripts/dev-place-order.ts [count] [regular|express]
- *   BASE_URL=http://127.0.0.1:9200 (default http://127.0.0.1:${PORT:-9000})
+ *   CHEFS_DEV_SCRIPT=1 npx medusa exec ./src/scripts/dev-place-order.ts [count] [regular|express]
+ *   BASE_URL (required), e.g. http://127.0.0.1:9200; DATABASE_URL must point at a *_dev / *_test database.
  */
 export default async function devPlaceOrder({ container, args }: ExecArgs) {
   const count = Number(args?.[0] ?? 1)
-  const deliveryType = (args?.[1] ?? "regular") as "regular" | "express"
-  const base = process.env.BASE_URL ?? `http://127.0.0.1:${process.env.PORT ?? 9000}`
+  if (!Number.isInteger(count) || count < 1 || count > 50) throw new Error("count must be an integer between 1 and 50")
+  const deliveryType = args?.[1] ?? "regular"
+  if (deliveryType !== "regular" && deliveryType !== "express") throw new Error("delivery type must be regular or express")
+  // No default port: the caller must say which dev server to drive (9000/9100 are production/staging).
+  const base = process.env.BASE_URL
+  if (!base) throw new Error("set BASE_URL to the dev server, e.g. http://127.0.0.1:9200")
+  let dbName = ""
+  try {
+    dbName = new URL(process.env.DATABASE_URL ?? "").pathname.replace(/^\//, "")
+  } catch {
+    /* refused below */
+  }
+  const refusal = devScriptRefusal(process.env, dbName, base)
+  if (refusal) throw new Error(`dev-place-order refused: ${refusal}`)
 
   const { createProductsWorkflow } = await import("@medusajs/medusa/core-flows")
   const [pk] = await container.resolve("api_key").listApiKeys({ title: "chefs-app" })

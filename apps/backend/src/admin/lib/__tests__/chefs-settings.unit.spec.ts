@@ -37,7 +37,7 @@ describe("validateSettingsForm", () => {
 describe("serverErrorLines", () => {
   it("extracts zod issues from a JSON message", () => {
     const msg = JSON.stringify([{ path: ["round_times", 0], message: "Invalid" }, { path: ["whatsapp_number"], message: "invalid_phone" }])
-    expect(serverErrorLines({ message: msg })).toEqual(["round_times.0: Invalid", "whatsapp_number: invalid_phone"])
+    expect(serverErrorLines({ message: msg })).toEqual(["round_times.0: Invalid", "WhatsApp number: not a valid Iraqi mobile number (e.g. 07701234567)"])
   })
   it("falls back to the raw message", () => {
     expect(serverErrorLines({ message: "boom" })).toEqual(["boom"])
@@ -51,5 +51,11 @@ describe("formFromSettings", () => {
       whatsapp_number: "x", round_times: ["10:00"], cutoff_minutes: "30", auto_cancel_minutes: "0",
     })
     expect(formFromSettings({}).round_times).toEqual([])
+  })
+})
+
+describe("invalid_phone message", () => {
+  it("is friendly", () => {
+    expect(serverErrorLines({ message: JSON.stringify([{ path: ["whatsapp_number"], message: "invalid_phone" }]) })[0]).toMatch(/valid Iraqi mobile/)
   })
 })

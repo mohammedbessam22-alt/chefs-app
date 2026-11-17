@@ -51,7 +51,11 @@ export function serverErrorLines(body: any): string[] {
   try {
     const issues = JSON.parse(msg)
     if (Array.isArray(issues) && issues.length) {
-      return issues.map((i: any) => `${(i.path ?? []).join(".")}${i.path?.length ? ": " : ""}${i.message}`)
+      return issues.map((i: any) =>
+        i.message === "invalid_phone"
+          ? "WhatsApp number: not a valid Iraqi mobile number (e.g. 07701234567)"
+          : `${(i.path ?? []).join(".")}${i.path?.length ? ": " : ""}${i.message}`
+      )
     }
   } catch {
     /* not JSON */
