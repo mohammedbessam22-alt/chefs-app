@@ -66,7 +66,10 @@ medusaIntegrationTestRunner({
       expect((await api.post(`/admin/chefs/orders/${order.id}/confirm`, {}, h)).status).toBe(200)
       expect((await api.post(`/admin/chefs/orders/${order.id}/deliver`, {}, h)).status).toBe(200)
       const level = async (variantId: string) => {
-        const { data: [v] } = await container().resolve("query").graph({
+        const query: any = container().resolve("query")
+        const {
+          data: [v],
+        } = await query.graph({
           entity: "variant",
           fields: ["inventory_items.inventory_item_id"],
           filters: { id: variantId },
