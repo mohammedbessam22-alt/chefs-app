@@ -37,5 +37,6 @@ module.exports = defineConfig({
   modules: [
     ...lockingModules,
     { resolve: "./src/modules/delivery-settings" },
+    { resolve: "./src/modules/translations" },
   ],
 })
