@@ -1,7 +1,7 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
-import { cancelOrderWorkflow } from "@medusajs/medusa/core-flows"
 import { applyAction, type Confirmation, type StaffAction } from "../../../../../../lib/confirmation"
+import { cancelChefsOrder } from "../../../../../../lib/cancel-order"
 import { orderLockKey } from "../../../../../../lib/order-lock"
 import { ORDER_ROW_FIELDS, effectiveConfirmation, toOrderRow } from "../../../../../../lib/order-row"
 
@@ -13,18 +13,6 @@ async function readOrder(container: any, id: string) {
     data: [order],
   } = await query.graph({ entity: "order", fields: ORDER_ROW_FIELDS, filters: { id } })
   return order
-}
-
-/** Cancel path: releases reservations through Medusa's workflow. Easy to extract (Task 6). */
-async function cancelChefsOrder(container: any, orderId: string) {
-  try {
-    await cancelOrderWorkflow(container).run({ input: { order_id: orderId } })
-  } catch (e: any) {
-    // Medusa already canceled it (e.g. auto-cancel won the race): the caller
-    // repairs the metadata; anything else is a real failure.
-    const current = await readOrder(container, orderId)
-    if (current?.status !== "canceled") throw e
-  }
 }
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
