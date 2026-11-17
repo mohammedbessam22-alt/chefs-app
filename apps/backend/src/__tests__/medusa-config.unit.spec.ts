@@ -26,3 +26,32 @@ describe("medusa-config locking", () => {
     expect(p.options.redisUrl).toBe("redis://127.0.0.1:6379/3")
   })
 })
+
+describe("medusa-config file storage", () => {
+  const load = (backendUrl?: string) => {
+    const prev = process.env.MEDUSA_BACKEND_URL
+    if (backendUrl) process.env.MEDUSA_BACKEND_URL = backendUrl
+    else delete process.env.MEDUSA_BACKEND_URL
+    let cfg: any
+    jest.isolateModules(() => {
+      cfg = require("../../medusa-config")
+    })
+    if (prev === undefined) delete process.env.MEDUSA_BACKEND_URL
+    else process.env.MEDUSA_BACKEND_URL = prev
+    return cfg
+  }
+  const fileProvider = (cfg: any) => {
+    const list = Array.isArray(cfg.modules) ? cfg.modules : Object.values(cfg.modules)
+    const entry = list.find((m: any) => m?.resolve === "@medusajs/medusa/file")
+    return entry?.options?.providers?.[0]
+  }
+
+  it("serves uploads from MEDUSA_BACKEND_URL/static", () => {
+    const p = fileProvider(load("https://shop.example.com"))
+    expect(p.resolve).toBe("@medusajs/medusa/file-local")
+    expect(p.options).toEqual({ upload_dir: "static", backend_url: "https://shop.example.com/static" })
+  })
+  it("defaults to http://localhost:9000/static", () => {
+    expect(fileProvider(load()).options.backend_url).toBe("http://localhost:9000/static")
+  })
+})
