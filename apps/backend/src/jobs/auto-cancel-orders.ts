@@ -2,6 +2,7 @@ import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import { cancelChefsOrder } from "../lib/cancel-order"
 import { orderLockKey } from "../lib/order-lock"
 import { ORDER_ROW_FIELDS, effectiveConfirmation } from "../lib/order-row"
+import { AUTO_CANCEL_MIN } from "../lib/settings-bounds"
 import { selectStale } from "../lib/stale-orders"
 import { DELIVERY_SETTINGS_MODULE } from "../modules/delivery-settings"
 
@@ -21,7 +22,9 @@ export async function runAutoCancel(container: any, now: Date = new Date()): Pro
   const query: any = container.resolve(ContainerRegistrationKeys.QUERY)
   const locking: any = container.resolve(Modules.LOCKING)
   const orderService: any = container.resolve(Modules.ORDER)
-  const { auto_cancel_minutes: minutes } = await (container.resolve(DELIVERY_SETTINGS_MODULE) as any).getSettings()
+  const settings = await (container.resolve(DELIVERY_SETTINGS_MODULE) as any).getSettings()
+  // Never below the validated minimum, even if an out-of-range value was stored before validation existed.
+  const minutes = Math.max(Number(settings.auto_cancel_minutes), AUTO_CANCEL_MIN)
 
   const cutoff = new Date(+now - minutes * 60000)
   // Only open, real (non-draft) orders. created_at <= placed_at, so the created_at bound never misses

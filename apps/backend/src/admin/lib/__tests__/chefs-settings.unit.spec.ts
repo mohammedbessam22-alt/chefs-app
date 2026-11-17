@@ -29,6 +29,14 @@ describe("validateSettingsForm", () => {
     expect(r.ok).toBe(false)
     expect(Object.keys(r.errors).sort()).toEqual(["auto_cancel_minutes", "cutoff_minutes", "round_times", "whatsapp_number"])
   })
+  it("enforces auto-cancel 15..1440 and cut-off 0..720", () => {
+    const errs = (o: any) => (validateSettingsForm(form(o)) as any).errors ?? {}
+    expect(errs({ auto_cancel_minutes: "0" }).auto_cancel_minutes).toMatch(/15.*1440/)
+    expect(errs({ auto_cancel_minutes: "1441" }).auto_cancel_minutes).toMatch(/15.*1440/)
+    expect(errs({ cutoff_minutes: "721" }).cutoff_minutes).toMatch(/0.*720/)
+    expect(validateSettingsForm(form({ auto_cancel_minutes: "15", cutoff_minutes: "0" })).ok).toBe(true)
+    expect(validateSettingsForm(form({ auto_cancel_minutes: "1440", cutoff_minutes: "720" })).ok).toBe(true)
+  })
   it("rejects empty numeric strings", () => {
     expect((validateSettingsForm(form({ cutoff_minutes: "" })) as any).errors.cutoff_minutes).toBeTruthy()
   })

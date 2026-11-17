@@ -2,7 +2,7 @@ import { defineRouteConfig } from "@medusajs/admin-sdk"
 import { Button, Container, Heading, Input, Label, Text, toast } from "@medusajs/ui"
 import { useEffect, useState } from "react"
 import { chefsFetch } from "../../lib/chefs-api"
-import { formFromSettings, serverErrorLines, validateSettingsForm, type SettingsForm } from "../../lib/chefs-settings"
+import { SETTINGS_BOUNDS, formFromSettings, serverErrorLines, validateSettingsForm, type SettingsForm } from "../../lib/chefs-settings"
 
 // The form is loaded once and never refreshed in the background, so edits are never overwritten.
 const SettingsPage = () => {
@@ -110,12 +110,16 @@ const SettingsPage = () => {
         {err("round_times")}
       </div>
       <div className="flex max-w-xl flex-col gap-1 px-6 py-4">
-        <Label size="small">Order cut-off (minutes before a round)</Label>
+        <Label size="small">
+          Order cut-off (minutes before a round, {SETTINGS_BOUNDS.CUTOFF_MIN}-{SETTINGS_BOUNDS.CUTOFF_MAX})
+        </Label>
         <Input inputMode="numeric" value={form.cutoff_minutes} onChange={(e) => set("cutoff_minutes", e.target.value)} />
         {err("cutoff_minutes")}
       </div>
       <div className="flex max-w-xl flex-col gap-1 px-6 py-4">
-        <Label size="small">Auto-cancel unconfirmed orders after (minutes)</Label>
+        <Label size="small">
+          Auto-cancel unconfirmed orders after (minutes, {SETTINGS_BOUNDS.AUTO_CANCEL_MIN}-{SETTINGS_BOUNDS.AUTO_CANCEL_MAX})
+        </Label>
         <Input inputMode="numeric" value={form.auto_cancel_minutes} onChange={(e) => set("auto_cancel_minutes", e.target.value)} />
         {err("auto_cancel_minutes")}
       </div>

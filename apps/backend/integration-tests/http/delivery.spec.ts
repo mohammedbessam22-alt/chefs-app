@@ -59,5 +59,19 @@ medusaIntegrationTestRunner({
         .catch((e: any) => e.response)
       expect(badPhone.status).toBe(400)
     })
+
+    it("bounds auto_cancel_minutes to 15..1440 and cutoff_minutes to 0..720", async () => {
+      const post = (body: any) => api.post("/admin/chefs/settings", body, adminHeaders(token)).catch((e: any) => e.response)
+      expect((await post({ auto_cancel_minutes: 0 })).status).toBe(400)
+      expect((await post({ auto_cancel_minutes: 14 })).status).toBe(400)
+      expect((await post({ auto_cancel_minutes: 1441 })).status).toBe(400)
+      expect((await post({ cutoff_minutes: -1 })).status).toBe(400)
+      expect((await post({ cutoff_minutes: 721 })).status).toBe(400)
+      const ok = await post({ auto_cancel_minutes: 15, cutoff_minutes: 0 })
+      expect(ok.status).toBe(200)
+      expect(ok.data).toMatchObject({ auto_cancel_minutes: 15, cutoff_minutes: 0 })
+      const ok2 = await post({ auto_cancel_minutes: 1440, cutoff_minutes: 720 })
+      expect(ok2.data).toMatchObject({ auto_cancel_minutes: 1440, cutoff_minutes: 720 })
+    })
   },
 })

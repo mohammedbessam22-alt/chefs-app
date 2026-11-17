@@ -2,6 +2,7 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { z } from "zod"
 import { DELIVERY_SETTINGS_MODULE } from "../../../../modules/delivery-settings"
 import { normalizeIraqiPhone } from "../../../../lib/phone"
+import { AUTO_CANCEL_MAX, AUTO_CANCEL_MIN, CUTOFF_MAX, CUTOFF_MIN } from "../../../../lib/settings-bounds"
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/
 
@@ -18,8 +19,9 @@ const schema = z.object({
     })
     .optional(),
   round_times: z.array(z.string().regex(HHMM)).optional(),
-  cutoff_minutes: z.number().int().min(0).optional(),
-  auto_cancel_minutes: z.number().int().min(0).optional(),
+  cutoff_minutes: z.number().int().min(CUTOFF_MIN).max(CUTOFF_MAX).optional(),
+  // 0 would cancel every new order on the next job run.
+  auto_cancel_minutes: z.number().int().min(AUTO_CANCEL_MIN).max(AUTO_CANCEL_MAX).optional(),
 })
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {

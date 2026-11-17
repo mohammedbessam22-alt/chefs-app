@@ -1,4 +1,7 @@
 // Pure helpers for the Delivery settings page (unit-tested).
+import { AUTO_CANCEL_MAX, AUTO_CANCEL_MIN, CUTOFF_MAX, CUTOFF_MIN } from "../../lib/settings-bounds"
+
+export const SETTINGS_BOUNDS = { AUTO_CANCEL_MIN, AUTO_CANCEL_MAX, CUTOFF_MIN, CUTOFF_MAX }
 export type SettingsForm = {
   whatsapp_number: string
   round_times: string[]
@@ -21,7 +24,7 @@ export function normalizeRoundTimes(input: string[]): { times: string[]; invalid
   return { times: [...ok].sort(), invalid }
 }
 
-const nonNegInt = (s: string) => /^\d+$/.test(s.trim())
+const intIn = (s: string, min: number, max: number) => /^\d+$/.test(s.trim()) && +s >= min && +s <= max
 
 export function validateSettingsForm(
   f: SettingsForm
@@ -30,8 +33,10 @@ export function validateSettingsForm(
   if (!f.whatsapp_number.trim()) errors.whatsapp_number = "WhatsApp number is required"
   const { times, invalid } = normalizeRoundTimes(f.round_times)
   if (invalid.length) errors.round_times = `Invalid time (use HH:MM, 24h): ${invalid.join(", ")}`
-  if (!nonNegInt(f.cutoff_minutes)) errors.cutoff_minutes = "Enter a whole number of minutes (0 or more)"
-  if (!nonNegInt(f.auto_cancel_minutes)) errors.auto_cancel_minutes = "Enter a whole number of minutes (0 or more)"
+  if (!intIn(f.cutoff_minutes, CUTOFF_MIN, CUTOFF_MAX))
+    errors.cutoff_minutes = `Enter a whole number of minutes from ${CUTOFF_MIN} to ${CUTOFF_MAX}`
+  if (!intIn(f.auto_cancel_minutes, AUTO_CANCEL_MIN, AUTO_CANCEL_MAX))
+    errors.auto_cancel_minutes = `Enter a whole number of minutes from ${AUTO_CANCEL_MIN} to ${AUTO_CANCEL_MAX}`
   if (Object.keys(errors).length) return { ok: false, errors }
   return {
     ok: true,
