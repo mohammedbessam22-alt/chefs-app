@@ -11,23 +11,38 @@ export type Settings = {
   auto_cancel_minutes: number
 }
 
+// `round_times` is a json column: Medusa types it as Record<string, unknown>
+// but it is stored and used as string[]. The casts live at this boundary only.
+type StoredRow = Omit<Settings, "round_times"> & { round_times?: unknown }
+
+const fromStored = (row: unknown): Settings => {
+  const r = row as StoredRow
+  return {
+    ...r,
+    round_times: Array.isArray(r.round_times) ? (r.round_times as string[]) : [],
+  } as Settings
+}
+
 class DeliverySettingsModuleService extends MedusaService({ DeliverySettings }) {
   async getSettings(): Promise<Settings> {
     const read = async () => {
       const [row] = await this.listDeliverySettings({ id: SINGLETON_ID }, { take: 1 })
-      return row as unknown as Settings | undefined
+      return row ? fromStored(row) : undefined
     }
     const existing = await read()
     if (existing) return existing
+    const defaults = {
+      id: SINGLETON_ID,
+      whatsapp_number: "",
+      round_times: [] as string[],
+      cutoff_minutes: 30,
+      auto_cancel_minutes: 120,
+    }
     try {
-      const created = await this.createDeliverySettings({
-        id: SINGLETON_ID,
-        whatsapp_number: "",
-        round_times: [],
-        cutoff_minutes: 30,
-        auto_cancel_minutes: 120,
-      })
-      return created as unknown as Settings
+      const created = await this.createDeliverySettings(
+        defaults as unknown as Record<string, unknown>
+      )
+      return fromStored(created)
     } catch (e) {
       // a concurrent request inserted the singleton first: re-read it
       const row = await read()
@@ -38,8 +53,10 @@ class DeliverySettingsModuleService extends MedusaService({ DeliverySettings }) 
 
   async updateSettings(data: Partial<Omit<Settings, "id">>): Promise<Settings> {
     const current = await this.getSettings()
-    const updated = await this.updateDeliverySettings({ id: current.id, ...data })
-    return updated as unknown as Settings
+    const updated = await this.updateDeliverySettings(
+      { id: current.id, ...data } as unknown as Record<string, unknown>
+    )
+    return fromStored(updated)
   }
 }
 
