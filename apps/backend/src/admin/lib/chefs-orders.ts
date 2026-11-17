@@ -28,6 +28,17 @@ export type PackingLocation = { id: string; name: string; orders: { display_id: 
 // Asia/Baghdad is fixed UTC+03:00 (same convention as the backend).
 export const baghdadToday = (now: Date = new Date()): string => new Date(now.getTime() + 180 * 60_000).toISOString().slice(0, 10)
 
+/**
+ * Date to use on a refresh: a date the user picked explicitly stays; otherwise "today" rolls
+ * forward (a tab left open past midnight moves to the new day).
+ */
+export function dateForRefresh(current: string, picked: boolean, now: Date = new Date()): string {
+  return picked ? current : baghdadToday(now)
+}
+
+/** A date chosen in the picker counts as explicit unless it is today (then it follows the clock again). */
+export const isExplicitDate = (value: string, now: Date = new Date()): boolean => value !== baghdadToday(now)
+
 export function buildOrdersQuery(f: OrderFilters, offset: number, limit: number): string {
   const p = new URLSearchParams()
   if (f.confirmation) p.set("confirmation", f.confirmation)

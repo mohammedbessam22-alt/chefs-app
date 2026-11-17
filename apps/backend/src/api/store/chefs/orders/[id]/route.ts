@@ -5,7 +5,7 @@ const FIELDS = ["id", "status", "display_id", "created_at", "total", "metadata"]
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const query: any = req.scope.resolve("query")
-  const { data } = await query.graph({ entity: "order", fields: FIELDS, filters: { id: req.params.id } })
+  const { data } = await query.graph({ entity: "order", fields: FIELDS, filters: { id: req.params.id, is_draft_order: false } })
   const o = data?.[0]
   if (!o) {
     res.status(404).json({ type: "not_found", message: "Order not found" })

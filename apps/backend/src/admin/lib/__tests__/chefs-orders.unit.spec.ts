@@ -1,4 +1,4 @@
-import { allowedActions, baghdadToday, buildOrdersQuery, buildPackingQuery, hasMore, whatsappUrl, mapsUrl, actionErrorMessage, clampOffset, tryBegin } from "../chefs-orders"
+import { allowedActions, baghdadToday, dateForRefresh, isExplicitDate, buildOrdersQuery, buildPackingQuery, hasMore, whatsappUrl, mapsUrl, actionErrorMessage, clampOffset, tryBegin } from "../chefs-orders"
 
 describe("baghdadToday", () => {
   it("uses UTC+3 (late UTC evening is already tomorrow)", () => {
@@ -63,6 +63,20 @@ describe("links", () => {
     expect(mapsUrl(NaN, 1)).toBeNull()
     expect(mapsUrl(Infinity, 1)).toBeNull()
     expect(mapsUrl(95, 1)).toBeNull()
+  })
+})
+
+describe("dateForRefresh", () => {
+  const afterMidnight = new Date("2026-11-17T21:05:00Z") // 00:05 on the 18th in Baghdad
+  it("rolls today forward when the user has not picked a date", () => {
+    expect(dateForRefresh("2026-11-17", false, afterMidnight)).toBe("2026-11-18")
+  })
+  it("keeps an explicitly picked date", () => {
+    expect(dateForRefresh("2026-11-10", true, afterMidnight)).toBe("2026-11-10")
+  })
+  it("picking today is not explicit; picking another day is", () => {
+    expect(isExplicitDate("2026-11-18", afterMidnight)).toBe(false)
+    expect(isExplicitDate("2026-11-19", afterMidnight)).toBe(true)
   })
 })
 

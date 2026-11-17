@@ -23,4 +23,11 @@ describe("selectStale", () => {
   it("excludes exactly-at-limit orders", () => {
     expect(selectStale([o("a", 120, "awaiting")], now, 120)).toEqual([])
   })
+  it("ages from metadata.placed_at (subscriber handling time) when present, e.g. a converted old draft", () => {
+    const old = new Date(+now - 3 * 86400_000).toISOString()
+    const fresh = { id: "x", created_at: old, metadata: { confirmation: "awaiting", placed_at: new Date(+now - 10 * 60000).toISOString() } }
+    const stale = { id: "y", created_at: old, metadata: { confirmation: "awaiting", placed_at: new Date(+now - 121 * 60000).toISOString() } }
+    const bad = { id: "z", created_at: old, metadata: { confirmation: "awaiting", placed_at: "garbage" } }
+    expect(selectStale([fresh, stale, bad], now, 120)).toEqual(["y", "z"])
+  })
 })

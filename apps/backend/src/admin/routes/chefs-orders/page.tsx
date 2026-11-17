@@ -6,6 +6,8 @@ import {
   actionErrorMessage,
   allowedActions,
   baghdadToday,
+  dateForRefresh,
+  isExplicitDate,
   buildOrdersQuery,
   clampOffset,
   tryBegin,
@@ -78,13 +80,24 @@ const OrdersPage = () => {
   // Rows shown belong to the previous query while a reload for changed filters/page is in flight.
   const rowsStale = loading
 
-  // Auto-refresh: only touches the list data, never filters, dialog or paging.
+  // "Today" follows the clock until the user picks another date (a tab open past midnight moves on).
+  const datePicked = useRef(false)
+  const dateRef = useRef(filters.date)
+  dateRef.current = filters.date
+  const refresh = useCallback(() => {
+    const next = dateForRefresh(dateRef.current, datePicked.current)
+    if (next === dateRef.current) return load()
+    setOffset(0)
+    setFilters((f) => ({ ...f, date: next }))
+  }, [load])
+
+  // Auto-refresh: only touches the list data (and rolls an unpicked "today"), never dialog or other filters.
   useEffect(() => {
     const t = setInterval(() => {
-      if (document.visibilityState !== "hidden") load()
+      if (document.visibilityState !== "hidden") refresh()
     }, REFRESH_MS)
     return () => clearInterval(t)
-  }, [load])
+  }, [refresh])
 
   useEffect(() => {
     chefsFetch("/admin/chefs/settings").then((r) => r.ok && setRounds(r.body.round_times ?? []))
@@ -136,11 +149,15 @@ const OrdersPage = () => {
           <Input
             type="date"
             size="small"
-            aria-label="Date"
+            aria-label="Delivery day" title="Delivery day"
             value={filters.date}
-            onChange={(e) => e.target.value && setFilter("date", e.target.value)}
+            onChange={(e) => {
+              if (!e.target.value) return
+              datePicked.current = isExplicitDate(e.target.value)
+              setFilter("date", e.target.value)
+            }}
           />
-          <Button size="small" variant="secondary" onClick={() => load()}>
+          <Button size="small" variant="secondary" onClick={() => refresh()}>
             Refresh
           </Button>
         </div>

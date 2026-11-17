@@ -2,7 +2,7 @@ import { defineRouteConfig } from "@medusajs/admin-sdk"
 import { Badge, Button, Container, Heading, Input, Text } from "@medusajs/ui"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { chefsFetch } from "../../lib/chefs-api"
-import { baghdadToday, buildPackingQuery, type PackingFilters, type PackingLocation } from "../../lib/chefs-orders"
+import { baghdadToday, buildPackingQuery, dateForRefresh, isExplicitDate, type PackingFilters, type PackingLocation } from "../../lib/chefs-orders"
 
 const selectClass = "bg-ui-bg-field border-ui-border-base text-ui-fg-base txt-compact-small h-8 rounded-md border px-2"
 
@@ -32,6 +32,16 @@ const PackingPage = () => {
     load()
   }, [filters, load])
 
+  // "Today" follows the clock until the user picks another date (a tab open past midnight moves on).
+  const datePicked = useRef(false)
+  const dateRef = useRef(filters.date)
+  dateRef.current = filters.date
+  const refresh = useCallback(() => {
+    const next = dateForRefresh(dateRef.current, datePicked.current)
+    if (next === dateRef.current) return load()
+    setFilters((f) => ({ ...f, date: next }))
+  }, [load])
+
   useEffect(() => {
     chefsFetch("/admin/chefs/settings").then((r) => r.ok && setRounds(r.body.round_times ?? []))
   }, [])
@@ -44,7 +54,7 @@ const PackingPage = () => {
         <div>
           <Heading>Packing</Heading>
           <Text size="small" className="text-ui-fg-subtle">
-            Confirmed orders only, one column per warehouse.
+            Confirmed orders for the delivery day, one column per warehouse.
           </Text>
         </div>
         <div className="flex flex-wrap items-end gap-2">
@@ -56,8 +66,14 @@ const PackingPage = () => {
               </option>
             ))}
           </select>
-          <Input type="date" size="small" aria-label="Date" value={filters.date} onChange={(e) => e.target.value && setFilters((f) => ({ ...f, date: e.target.value }))} />
-          <Button size="small" variant="secondary" onClick={() => load()}>
+          <Input type="date" size="small" aria-label="Delivery day" title="Delivery day" value={filters.date} onChange={(e) => {
+              const value = e.target.value
+              if (!value) return
+              datePicked.current = isExplicitDate(value)
+              setFilters((f) => ({ ...f, date: value }))
+            }}
+          />
+          <Button size="small" variant="secondary" onClick={() => refresh()}>
             Refresh
           </Button>
           <Button size="small" onClick={() => window.print()}>

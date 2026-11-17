@@ -1,13 +1,13 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
-import { baghdadDayFilter } from "../../../../lib/baghdad-day"
+import { deliveryDay, deliveryDayQuery } from "../../../../lib/baghdad-day"
 import { effectiveConfirmation } from "../../../../lib/order-row"
 import { groupByLocation, resolveItemLocation, UNASSIGNED } from "../../../../lib/packing"
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const q = req.query as Record<string, string | undefined>
-  const filters = baghdadDayFilter(q.date)
-  if (!filters) {
+  const day = deliveryDayQuery(q.date)
+  if (!day) {
     res.status(400).json({ type: "invalid_data", message: "date must be YYYY-MM-DD" })
     return
   }
@@ -15,14 +15,16 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
   // Reads the order's current items (live order_item rows), so staff edits are reflected.
   const { data } = await query.graph({
     entity: "order",
-    fields: ["id", "status", "display_id", "metadata", "items.id", "items.variant_id", "items.title", "items.quantity"],
-    filters,
+    fields: ["id", "status", "display_id", "created_at", "metadata", "items.id", "items.variant_id", "items.title", "items.quantity"],
+    filters: { ...day.filters, is_draft_order: false },
     pagination: { order: { created_at: "ASC" }, take: null },
   })
   const orders = data
     .filter(
       (o: any) =>
-        effectiveConfirmation(o) === "confirmed" && (!q.round_label || (o.metadata?.round_label ?? null) === q.round_label)
+        effectiveConfirmation(o) === "confirmed" &&
+        deliveryDay(o) === day.date &&
+        (!q.round_label || (o.metadata?.round_label ?? null) === q.round_label)
     )
     .map((o: any) => ({
       display_id: o.display_id,

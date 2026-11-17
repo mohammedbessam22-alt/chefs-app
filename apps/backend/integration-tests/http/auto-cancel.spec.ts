@@ -52,12 +52,34 @@ medusaIntegrationTestRunner({
       expect((await getAdminOrder(api, young.id)).metadata.confirmation).toBe("awaiting")
     })
 
-    it("is idempotent and tolerates an order already canceled by Medusa", async () => {
+    it("is idempotent", async () => {
       const o = await place()
       const first = await runAutoCancel(container(), later(121))
       expect(first).toContain(o.id)
       const second = await runAutoCancel(container(), later(121))
       expect(second).not.toContain(o.id)
+    })
+
+    it("tolerates an order already canceled by Medusa's cancelOrderWorkflow", async () => {
+      const o = await place()
+      const { cancelOrderWorkflow } = await import("@medusajs/medusa/core-flows")
+      await cancelOrderWorkflow(container()).run({ input: { order_id: o.id } })
+      expect((await getAdminOrder(api, o.id)).status).toBe("canceled")
+      expect((await getAdminOrder(api, o.id)).metadata.confirmation).toBe("awaiting")
+      const run = await runAutoCancel(container(), later(121))
+      expect(run).not.toContain(o.id)
+      expect((await getAdminOrder(api, o.id)).status).toBe("canceled")
+    })
+
+    it("Confirm on an order the job just cancelled is a 409, not a resurrection", async () => {
+      const o = await place()
+      expect(await runAutoCancel(container(), later(121))).toContain(o.id)
+      const res = await api.post(`/admin/chefs/orders/${o.id}/confirm`, {}, adminHeaders(token)).catch((e: any) => e.response)
+      expect(res.status).toBe(409)
+      expect(res.data.message).toBe("invalid_transition")
+      const after = await getAdminOrder(api, o.id)
+      expect(after.status).toBe("canceled")
+      expect(after.metadata.confirmation).toBe("cancelled")
     })
   },
 })
