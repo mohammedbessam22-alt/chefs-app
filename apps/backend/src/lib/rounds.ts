@@ -15,7 +15,8 @@ export function nextRound(
   let best: { label: string; ms: number } | null = null
   for (const label of roundTimes) {
     const [h, m] = label.split(":").map(Number)
-    for (let day = 0; day <= 1; day++) {
+    const maxDay = Math.ceil(cutoffMinutes / 1440) + 1
+    for (let day = 0; day <= maxDay; day++) {
       const ms = dayStart + day * 86_400_000 + (h * 60 + m) * 60_000 - BAGHDAD_OFFSET_MS
       // orderable until cut-off (strictly before it)
       if (ms - cutoffMinutes * 60_000 > now.getTime()) {

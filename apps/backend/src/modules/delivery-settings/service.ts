@@ -1,6 +1,8 @@
 import { MedusaService } from "@medusajs/framework/utils"
 import DeliverySettings from "./models/delivery-settings"
 
+const SINGLETON_ID = "delivery_settings"
+
 export type Settings = {
   id: string
   whatsapp_number: string
@@ -11,15 +13,27 @@ export type Settings = {
 
 class DeliverySettingsModuleService extends MedusaService({ DeliverySettings }) {
   async getSettings(): Promise<Settings> {
-    const [existing] = await this.listDeliverySettings({}, { take: 1 })
-    if (existing) return existing as unknown as Settings
-    const created = await this.createDeliverySettings({
-      whatsapp_number: "",
-      round_times: [],
-      cutoff_minutes: 30,
-      auto_cancel_minutes: 120,
-    })
-    return created as unknown as Settings
+    const read = async () => {
+      const [row] = await this.listDeliverySettings({ id: SINGLETON_ID }, { take: 1 })
+      return row as unknown as Settings | undefined
+    }
+    const existing = await read()
+    if (existing) return existing
+    try {
+      const created = await this.createDeliverySettings({
+        id: SINGLETON_ID,
+        whatsapp_number: "",
+        round_times: [],
+        cutoff_minutes: 30,
+        auto_cancel_minutes: 120,
+      })
+      return created as unknown as Settings
+    } catch (e) {
+      // a concurrent request inserted the singleton first: re-read it
+      const row = await read()
+      if (row) return row
+      throw e
+    }
   }
 
   async updateSettings(data: Partial<Omit<Settings, "id">>): Promise<Settings> {
