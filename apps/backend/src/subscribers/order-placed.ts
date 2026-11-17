@@ -21,6 +21,8 @@ export default async function orderPlacedHandler({
     filters: { id: data.id },
   })
   if (!order) return
+  // Replay-safe: never overwrite a state already stamped (e.g. confirmed/delivered by an admin)
+  if (order.metadata?.confirmation) return
 
   let deliveryType: "regular" | "express" = "regular"
   const method = order.shipping_methods?.[0]

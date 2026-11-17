@@ -15,10 +15,12 @@
  */
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils"
 import { seedChefs } from "../../src/scripts/seed"
+import handler from "../../src/subscribers/order-placed"
 import { DELIVERY_SETTINGS_MODULE } from "../../src/modules/delivery-settings"
 import {
   cartWith,
-  completeCart,
+  createCart,
+  storeHeaders,
   countOrders,
   createStockedVariant,
   getAdminOrder,
@@ -93,18 +95,59 @@ medusaIntegrationTestRunner({
       expect(new Set(reservations.map((r: any) => r.location_id))).toEqual(new Set([locA, locB]))
     })
 
-    it("refuses to complete a cart asking for more than stock", async () => {
+    it("does not reset a confirmed order when order.placed is delivered twice", async () => {
+      const order = await placeOrder(api, container(), { key, deliveryType: "regular" })
+      await waitFor(async () => (await getAdminOrder(api, order.id)).metadata?.confirmation === "awaiting")
+      const orderService: any = container().resolve("order")
+      const current = await getAdminOrder(api, order.id)
+      await orderService.updateOrders(order.id, { metadata: { ...current.metadata, confirmation: "confirmed" } })
+      await handler({ event: { name: "order.placed", data: { id: order.id } }, container: container() } as any)
+      const after = await getAdminOrder(api, order.id)
+      expect(after.metadata.confirmation).toBe("confirmed")
+      expect(after.metadata.delivery_type).toBe("regular")
+    })
+
+    it("rejects adding more than stock to a cart with an inventory error", async () => {
+      const locA = await getLocationId(container(), "Warehouse A")
+      const v = await createStockedVariant(container(), { stock: 2, locationId: locA })
+      const [region] = await container().resolve("region").listRegions({ name: "Iraq" })
+      const cart = await createCart(api, key, region.id)
+      const res = await api
+        .post(`/store/carts/${cart.id}/line-items`, { variant_id: v, quantity: 3 }, storeHeaders(key))
+        .catch((e: any) => e.response)
+      expect(res.status).toBeGreaterThanOrEqual(400)
+      expect(JSON.stringify(res.data)).toMatch(/inventory/i)
+    })
+
+    it("refuses to complete a cart when stock dropped below the quantity, with no order or reservation", async () => {
+      const locA = await getLocationId(container(), "Warehouse A")
+      const v = await createStockedVariant(container(), { stock: 3, locationId: locA })
+      const cart = await cartWith(api, container(), { key, items: [{ variant_id: v, quantity: 3 }] })
+      const query: any = container().resolve("query")
+      const {
+        data: [variant],
+      } = await query.graph({
+        entity: "variant",
+        fields: ["id", "inventory_items.inventory_item_id"],
+        filters: { id: v },
+      })
+      const itemId = variant.inventory_items[0].inventory_item_id
+      await container()
+        .resolve("inventory")
+        .updateInventoryLevels([{ inventory_item_id: itemId, location_id: locA, stocked_quantity: 2 }])
       const before = await countOrders(api)
-      const cart = await cartWith(api, container(), { key, variantStock: 2, quantity: 3 }).catch(
-        (e: any) => ({ failed: e })
-      )
-      // Medusa may reject at add-to-cart or at completion; either way no order is created.
-      if (!(cart as any).failed) {
-        await expect(completeCart(api, key, (cart as any).id)).rejects.toMatchObject({
-          response: { status: expect.any(Number) },
-        })
-      }
+      const res = await api
+        .post(`/store/carts/${cart.id}/complete`, {}, storeHeaders(key))
+        .catch((e: any) => e.response)
+      expect(res.status).toBeGreaterThanOrEqual(400)
+      expect(res.data).toMatchObject({ type: "not_allowed", message: expect.stringMatching(/not enough stock/i) })
       expect(await countOrders(api)).toBe(before)
+      const { data: reservations } = await query.graph({
+        entity: "reservation_item",
+        fields: ["id"],
+        filters: { inventory_item_id: itemId },
+      })
+      expect(reservations).toHaveLength(0)
     })
   },
 })
