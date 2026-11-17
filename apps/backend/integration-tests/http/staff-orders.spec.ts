@@ -94,5 +94,45 @@ medusaIntegrationTestRunner({
       const { data: d3 } = await api.get(`/admin/chefs/orders?date=2000-01-01`, adminHeaders(token))
       expect(d3.orders).toHaveLength(0)
     })
+
+    it("treats a Medusa-canceled order with stale metadata as cancelled and repairs on cancel", async () => {
+      const order = await place()
+      const { cancelOrderWorkflow } = await import("@medusajs/medusa/core-flows")
+      await cancelOrderWorkflow(container()).run({ input: { order_id: order.id } })
+      expect((await getAdminOrder(api, order.id)).metadata.confirmation).toBe("awaiting")
+
+      const conf = await act(order.id, "confirm").catch((e: any) => e.response)
+      expect(conf.status).toBe(409)
+      const dlv = await act(order.id, "deliver").catch((e: any) => e.response)
+      expect(dlv.status).toBe(409)
+
+      const { data } = await api.get("/admin/chefs/orders?confirmation=cancelled", adminHeaders(token))
+      expect(data.orders.map((o: any) => o.id)).toContain(order.id)
+
+      const fix = await act(order.id, "cancel")
+      expect(fix.status).toBe(200)
+      expect(fix.data.order.confirmation).toBe("cancelled")
+      expect((await getAdminOrder(api, order.id)).metadata.confirmation).toBe("cancelled")
+      // now genuinely cancelled: a second cancel is a 409
+      const again = await act(order.id, "cancel").catch((e: any) => e.response)
+      expect(again.status).toBe(409)
+    })
+
+    it("paginates with limit/offset/count and never truncates silently", async () => {
+      for (let i = 0; i < 3; i++) await place({ deliveryType: "express" })
+      const url = (qs: string) => api.get(`/admin/chefs/orders?delivery_type=express&${qs}`, adminHeaders(token))
+      const all = (await url("limit=500")).data
+      expect(all.count).toBeGreaterThanOrEqual(3)
+      expect(all.orders).toHaveLength(all.count)
+      const p1 = (await url("limit=2&offset=0")).data
+      expect(p1).toMatchObject({ limit: 2, offset: 0, count: all.count })
+      expect(p1.orders).toHaveLength(2)
+      expect(p1.count).toBeGreaterThan(p1.orders.length)
+      const p2 = (await url("limit=2&offset=2")).data
+      expect(p2.orders[0].id).toBe(all.orders[2].id)
+      expect(p1.orders.map((o: any) => o.id)).toEqual(all.orders.slice(0, 2).map((o: any) => o.id))
+      const bad = await url("limit=abc").catch((e: any) => e.response)
+      expect(bad.status).toBe(400)
+    })
   },
 })

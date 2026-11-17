@@ -2,6 +2,7 @@ import type { Confirmation } from "./confirmation"
 
 export const ORDER_ROW_FIELDS = [
   "id",
+  "status",
   "display_id",
   "created_at",
   "total",
@@ -14,6 +15,12 @@ export const ORDER_ROW_FIELDS = [
   "items.quantity",
 ]
 
+/** Medusa-canceled orders are cancelled even if metadata is stale (e.g. a failed metadata write). */
+export function effectiveConfirmation(o: any): Confirmation {
+  if (o?.status === "canceled") return "cancelled"
+  return (o?.metadata?.confirmation ?? "awaiting") as Confirmation
+}
+
 export function toOrderRow(o: any) {
   const m = o.metadata ?? {}
   const a = o.shipping_address ?? {}
@@ -23,7 +30,7 @@ export function toOrderRow(o: any) {
     display_id: o.display_id,
     created_at: o.created_at,
     total: Number(o.total),
-    confirmation: (m.confirmation ?? "awaiting") as Confirmation,
+    confirmation: effectiveConfirmation(o),
     delivery_type: m.delivery_type ?? "regular",
     round_label: m.round_label ?? null,
     customer_name: a.first_name ?? null,
