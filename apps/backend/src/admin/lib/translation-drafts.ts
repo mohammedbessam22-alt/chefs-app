@@ -27,3 +27,7 @@ export const mergeAfterSave = (server: Drafts, drafts: Drafts, failed: Locale[])
   for (const l of failed) out[l] = drafts[l]
   return out
 }
+
+/** Locales whose unsaved edits must survive a reload: every changed locale except those just saved. */
+export const localesToKeep = (snapshot: Drafts, drafts: Drafts, justSaved: Locale[]): Locale[] =>
+  changedLocales(snapshot, drafts).filter((l) => !justSaved.includes(l))

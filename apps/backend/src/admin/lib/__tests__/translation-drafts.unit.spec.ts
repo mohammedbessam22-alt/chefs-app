@@ -1,4 +1,4 @@
-import { blankTitleWithDescription, changedLocales, mergeAfterSave, type Drafts } from "../translation-drafts"
+import { blankTitleWithDescription, changedLocales, localesToKeep, mergeAfterSave, type Drafts } from "../translation-drafts"
 
 const d = (o: Partial<Drafts> = {}): Drafts => ({
   ckb: { title: "", description: "" },
@@ -50,5 +50,19 @@ describe("mergeAfterSave", () => {
   })
   it("equals the server state when nothing failed", () => {
     expect(mergeAfterSave(server, drafts, [])).toEqual(server)
+  })
+})
+
+describe("localesToKeep", () => {
+  const snap = d({ ckb: { title: "K", description: "" } })
+  const now = d({ ckb: { title: "K2", description: "" }, tk: { title: "T", description: "" } })
+  it("keeps every locale differing from the snapshot (retry case)", () => {
+    expect(localesToKeep(snap, now, [])).toEqual(["ckb", "tk"])
+  })
+  it("excludes locales that were just saved", () => {
+    expect(localesToKeep(snap, now, ["ckb"])).toEqual(["tk"])
+  })
+  it("is empty when nothing differs", () => {
+    expect(localesToKeep(snap, snap, [])).toEqual([])
   })
 })

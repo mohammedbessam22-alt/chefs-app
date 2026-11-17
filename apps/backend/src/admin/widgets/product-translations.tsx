@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
   blankTitleWithDescription,
   changedLocales,
+  localesToKeep,
   mergeAfterSave,
   type Draft,
   type Drafts,
@@ -38,9 +39,13 @@ const ProductTranslations = ({ data }: { data: { id: string } }) => {
   // Guards against stale responses (product changed, unmounted, or a newer load started).
   const loadSeq = useRef(0)
 
-  // `keep` = locales whose unsaved drafts must survive the refresh (failed saves).
+  const snapshotRef = useRef<Drafts>(empty())
+  const productIdRef = useRef(data.id)
+  productIdRef.current = data.id
+
+  // Unsaved edits survive a reload: every locale differing from the snapshot except `justSaved`.
   const load = useCallback(
-    async (keep: Locale[] = []) => {
+    async (justSaved: Locale[] = []) => {
       const seq = ++loadSeq.current
       setLoaded(false)
       setLoadError(false)
@@ -51,8 +56,9 @@ const ProductTranslations = ({ data }: { data: { id: string } }) => {
         if (seq !== loadSeq.current) return
         const server = empty()
         for (const t of r.translations) server[t.locale] = { title: t.title, description: t.description ?? "" }
+        setDrafts((d) => mergeAfterSave(server, d, localesToKeep(snapshotRef.current, d, justSaved)))
+        snapshotRef.current = server
         setSnapshot(server)
-        setDrafts((d) => mergeAfterSave(server, d, keep))
         setLoaded(true)
       } catch {
         if (seq === loadSeq.current) setLoadError(true)
@@ -62,6 +68,7 @@ const ProductTranslations = ({ data }: { data: { id: string } }) => {
   )
 
   useEffect(() => {
+    snapshotRef.current = empty()
     setDrafts(empty())
     setSnapshot(empty())
     load()
@@ -81,7 +88,7 @@ const ProductTranslations = ({ data }: { data: { id: string } }) => {
     if (!canSave) return
     setSaving(true)
     const saved: Locale[] = []
-    let failed: Locale[] = []
+    const savedFor = data.id
     try {
       for (const code of changed) {
         await request("/admin/chefs/translations", {
@@ -98,7 +105,6 @@ const ProductTranslations = ({ data }: { data: { id: string } }) => {
       }
       toast.success("Translations saved")
     } catch {
-      failed = changed.filter((c) => !saved.includes(c))
       toast.error(
         `Could not save all translations. Saved: ${saved.length ? saved.join(", ") : "none"}. Failed: ${changed
           .filter((c) => !saved.includes(c))
@@ -106,7 +112,9 @@ const ProductTranslations = ({ data }: { data: { id: string } }) => {
       )
     } finally {
       setSaving(false)
-      await load(failed) // refresh snapshot; keep drafts of failed locales so Save retries them
+      // refresh snapshot; unsaved edits (failed locales) are kept so Save retries them.
+      // Skip if the product changed meanwhile: the new product has its own load.
+      if (productIdRef.current === savedFor) await load(saved)
     }
   }
 
