@@ -20,3 +20,10 @@ export const blankTitleWithDescription = (drafts: Drafts): Locale[] =>
     const n = norm(drafts[l])
     return !n.title && !!n.description
   })
+
+/** After a save: server state for saved/untouched locales, the user's draft for failed ones. */
+export const mergeAfterSave = (server: Drafts, drafts: Drafts, failed: Locale[]): Drafts => {
+  const out = { ...server }
+  for (const l of failed) out[l] = drafts[l]
+  return out
+}

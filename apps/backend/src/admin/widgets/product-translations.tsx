@@ -1,9 +1,10 @@
 import { defineWidgetConfig } from "@medusajs/admin-sdk"
 import { Button, Container, Heading, Input, Label, Text, toast } from "@medusajs/ui"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   blankTitleWithDescription,
   changedLocales,
+  mergeAfterSave,
   type Draft,
   type Drafts,
   type Locale,
@@ -34,25 +35,39 @@ const ProductTranslations = ({ data }: { data: { id: string } }) => {
   const [loadError, setLoadError] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  const load = useCallback(async () => {
-    setLoaded(false)
-    setLoadError(false)
-    try {
-      const r: { translations: { locale: Locale; title: string; description: string | null }[] } = await request(
-        `/admin/chefs/translations?entity_type=product&entity_id=${encodeURIComponent(data.id)}`
-      )
-      const next = empty()
-      for (const t of r.translations) next[t.locale] = { title: t.title, description: t.description ?? "" }
-      setSnapshot(next)
-      setDrafts(next)
-      setLoaded(true)
-    } catch {
-      setLoadError(true)
-    }
-  }, [data.id])
+  // Guards against stale responses (product changed, unmounted, or a newer load started).
+  const loadSeq = useRef(0)
+
+  // `keep` = locales whose unsaved drafts must survive the refresh (failed saves).
+  const load = useCallback(
+    async (keep: Locale[] = []) => {
+      const seq = ++loadSeq.current
+      setLoaded(false)
+      setLoadError(false)
+      try {
+        const r: { translations: { locale: Locale; title: string; description: string | null }[] } = await request(
+          `/admin/chefs/translations?entity_type=product&entity_id=${encodeURIComponent(data.id)}`
+        )
+        if (seq !== loadSeq.current) return
+        const server = empty()
+        for (const t of r.translations) server[t.locale] = { title: t.title, description: t.description ?? "" }
+        setSnapshot(server)
+        setDrafts((d) => mergeAfterSave(server, d, keep))
+        setLoaded(true)
+      } catch {
+        if (seq === loadSeq.current) setLoadError(true)
+      }
+    },
+    [data.id]
+  )
 
   useEffect(() => {
+    setDrafts(empty())
+    setSnapshot(empty())
     load()
+    return () => {
+      loadSeq.current++
+    }
   }, [load])
 
   const set = (code: Locale, field: keyof Draft, value: string) =>
@@ -66,6 +81,7 @@ const ProductTranslations = ({ data }: { data: { id: string } }) => {
     if (!canSave) return
     setSaving(true)
     const saved: Locale[] = []
+    let failed: Locale[] = []
     try {
       for (const code of changed) {
         await request("/admin/chefs/translations", {
@@ -82,6 +98,7 @@ const ProductTranslations = ({ data }: { data: { id: string } }) => {
       }
       toast.success("Translations saved")
     } catch {
+      failed = changed.filter((c) => !saved.includes(c))
       toast.error(
         `Could not save all translations. Saved: ${saved.length ? saved.join(", ") : "none"}. Failed: ${changed
           .filter((c) => !saved.includes(c))
@@ -89,7 +106,7 @@ const ProductTranslations = ({ data }: { data: { id: string } }) => {
       )
     } finally {
       setSaving(false)
-      await load() // refresh the snapshot from the server
+      await load(failed) // refresh snapshot; keep drafts of failed locales so Save retries them
     }
   }
 
@@ -104,7 +121,7 @@ const ProductTranslations = ({ data }: { data: { id: string } }) => {
           {loadError && (
             <Text size="small" className="text-ui-fg-error">
               Could not load translations; saving is disabled.{" "}
-              <button type="button" className="underline" onClick={load}>
+              <button type="button" className="underline" onClick={() => load()}>
                 Retry
               </button>
             </Text>
@@ -123,13 +140,13 @@ const ProductTranslations = ({ data }: { data: { id: string } }) => {
         <div key={code} className="grid grid-cols-2 gap-4 px-6 py-4">
           <div className="flex flex-col gap-1">
             <Label size="small">{label} title</Label>
-            <Input dir={dir} disabled={!loaded} value={drafts[code].title} onChange={(e) => set(code, "title", e.target.value)} />
+            <Input dir={dir} disabled={!loaded || saving} value={drafts[code].title} onChange={(e) => set(code, "title", e.target.value)} />
           </div>
           <div className="flex flex-col gap-1">
             <Label size="small">{label} description</Label>
             <Input
               dir={dir}
-              disabled={!loaded}
+              disabled={!loaded || saving}
               value={drafts[code].description}
               onChange={(e) => set(code, "description", e.target.value)}
             />
