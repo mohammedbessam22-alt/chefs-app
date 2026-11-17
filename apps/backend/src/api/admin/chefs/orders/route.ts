@@ -1,11 +1,7 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
+import { baghdadDayFilter } from "../../../../lib/baghdad-day"
 import { ORDER_ROW_FIELDS, toOrderRow } from "../../../../lib/order-row"
-
-// Business timezone Asia/Baghdad is fixed UTC+03:00 (same convention as lib/rounds.ts).
-const BAGHDAD_OFFSET_MS = 180 * 60_000
-
-const baghdadDay = (ms: number) => new Date(ms + BAGHDAD_OFFSET_MS).toISOString().slice(0, 10)
 
 function intParam(v: string | undefined, def: number, min: number, max: number): number | null {
   if (v === undefined) return def
@@ -23,18 +19,10 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
   }
 
   // Without a date, default to today (Baghdad) so the in-memory filters never scan all orders.
-  const date = q.date ?? baghdadDay(Date.now())
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
-  const start = m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN
-  if (!m || Number.isNaN(start) || new Date(start).toISOString().slice(0, 10) !== date) {
+  const filters = baghdadDayFilter(q.date)
+  if (!filters) {
     res.status(400).json({ type: "invalid_data", message: "date must be YYYY-MM-DD" })
     return
-  }
-  const filters = {
-    created_at: {
-      $gte: new Date(start - BAGHDAD_OFFSET_MS).toISOString(),
-      $lt: new Date(start + 86_400_000 - BAGHDAD_OFFSET_MS).toISOString(),
-    },
   }
 
   const query: any = req.scope.resolve(ContainerRegistrationKeys.QUERY)
