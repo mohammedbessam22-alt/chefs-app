@@ -14,7 +14,7 @@ import { parse } from "csv-parse/sync"
 import { createHash } from "crypto"
 import fs from "fs"
 import path from "path"
-import { CatalogRow, parseCatalogRow } from "../lib/catalog-row"
+import { CatalogRow, catalogProductFields, parseCatalogRow } from "../lib/catalog-row"
 import { TRANSLATIONS_MODULE } from "../modules/translations"
 
 const WAREHOUSE_NAMES = { A: "Warehouse A", B: "Warehouse B" } as const
@@ -169,9 +169,10 @@ async function syncTranslations(ctx: Ctx, productId: string, row: CatalogRow) {
 }
 
 async function importRow(ctx: Ctx, row: CatalogRow, rowNo: number): Promise<"created" | "updated"> {
-  const category_ids = row.category_ar ? [await ensureCategory(ctx, row.category_ar)] : []
-  const collection_id = row.brand ? await ensureCollection(ctx, row.brand) : null
-  const description = row.description_ar || null
+  const refs = {
+    category_id: row.category_ar ? await ensureCategory(ctx, row.category_ar) : undefined,
+    collection_id: row.brand ? await ensureCollection(ctx, row.brand) : undefined,
+  }
 
   const { data } = await ctx.query.graph({
     entity: "product",
@@ -195,10 +196,8 @@ async function importRow(ctx: Ctx, row: CatalogRow, rowNo: number): Promise<"cre
         products: [
           {
             id: productId,
-            title: row.title_ar,
-            description,
-            collection_id,
-            category_ids,
+            // blank description/category/brand cells keep what staff already have
+            ...catalogProductFields(row, refs, "update"),
             ...(images.length ? { images } : {}),
             variants: [
               {
@@ -217,14 +216,11 @@ async function importRow(ctx: Ctx, row: CatalogRow, rowNo: number): Promise<"cre
       input: {
         products: [
           {
-            title: row.title_ar,
+            ...catalogProductFields(row, refs, "create"),
             handle: row.handle,
-            description: description ?? undefined,
             status: ProductStatus.PUBLISHED,
             shipping_profile_id: ctx.shippingProfileId,
             sales_channels: [{ id: ctx.salesChannelId }],
-            category_ids,
-            ...(collection_id ? { collection_id } : {}),
             ...(images.length ? { images } : {}),
             options: [{ title: "Default", values: ["Default"] }],
             variants: [

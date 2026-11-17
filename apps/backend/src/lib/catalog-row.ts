@@ -51,7 +51,7 @@ export function parseCatalogRow(row: Record<string, string>, n: number): Catalog
   if (wh !== "A" && wh !== "B") fail("warehouse")
 
   const price = parseWholeNumber(get("price_iqd"))
-  if (price === null) fail("price_iqd")
+  if (price === null || price === 0) fail("price_iqd")
   const stock = parseWholeNumber(get("stock"))
   if (stock === null) fail("stock")
 
@@ -69,4 +69,21 @@ export function parseCatalogRow(row: Record<string, string>, n: number): Catalog
     title_tk: get("title_tk"),
     title_en: get("title_en"),
   }
+}
+
+/**
+ * Product fields the import writes. Blank description_ar / category_ar / brand cells mean
+ * "leave as is" on update (fields omitted) and "none" on create.
+ */
+export function catalogProductFields(
+  row: CatalogRow,
+  refs: { category_id?: string; collection_id?: string },
+  mode: "create" | "update"
+): { title: string; description?: string; category_ids?: string[]; collection_id?: string } {
+  const out: { title: string; description?: string; category_ids?: string[]; collection_id?: string } = { title: row.title_ar }
+  if (row.description_ar) out.description = row.description_ar
+  if (row.category_ar && refs.category_id) out.category_ids = [refs.category_id]
+  else if (mode === "create") out.category_ids = []
+  if (row.brand && refs.collection_id) out.collection_id = refs.collection_id
+  return out
 }

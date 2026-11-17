@@ -1,4 +1,4 @@
-import { parseCatalogRow } from "../catalog-row"
+import { catalogProductFields, parseCatalogRow } from "../catalog-row"
 
 const base = {
   handle: "rice-1kg",
@@ -30,6 +30,11 @@ describe("parseCatalogRow", () => {
     expect(r.warehouse).toBe("B")
   })
 
+  it("rejects a zero price", () => {
+    expect(() => parseCatalogRow({ ...base, price_iqd: "0" }, 5)).toThrow("row 5: price_iqd")
+    expect(() => parseCatalogRow({ ...base, price_iqd: "000" }, 5)).toThrow("row 5: price_iqd")
+    expect(parseCatalogRow({ ...base, stock: "0" }, 5).stock).toBe(0) // zero stock is fine
+  })
   it("rejects a non-numeric price", () => {
     expect(() => parseCatalogRow({ ...base, price_iqd: "abc" }, 4)).toThrow("row 4: price_iqd")
     expect(() => parseCatalogRow({ ...base, price_iqd: "25.5" }, 4)).toThrow("row 4: price_iqd")
@@ -46,5 +51,38 @@ describe("parseCatalogRow", () => {
 
   it("treats blank stock as invalid", () => {
     expect(() => parseCatalogRow({ ...base, stock: "" }, 6)).toThrow("row 6: stock")
+  })
+})
+
+describe("catalogProductFields", () => {
+  const row = parseCatalogRow(base, 2)
+  const blank = parseCatalogRow({ ...base, description_ar: "", category_ar: "", brand: "" }, 2)
+  const refs = { category_id: "cat_1", collection_id: "col_1" }
+
+  it("update with blank description/category/brand keeps what is there (fields omitted)", () => {
+    const f = catalogProductFields(blank, {}, "update")
+    expect(f).toEqual({ title: base.title_ar })
+    expect("description" in f).toBe(false)
+    expect("category_ids" in f).toBe(false)
+    expect("collection_id" in f).toBe(false)
+  })
+  it("update with values sets them", () => {
+    expect(catalogProductFields({ ...row, description_ar: "وصف" }, refs, "update")).toEqual({
+      title: base.title_ar,
+      description: "وصف",
+      category_ids: ["cat_1"],
+      collection_id: "col_1",
+    })
+  })
+  it("create with blanks sets none", () => {
+    expect(catalogProductFields(blank, {}, "create")).toEqual({ title: base.title_ar, category_ids: [] })
+  })
+  it("create with values sets them", () => {
+    expect(catalogProductFields({ ...row, description_ar: "وصف" }, refs, "create")).toEqual({
+      title: base.title_ar,
+      description: "وصف",
+      category_ids: ["cat_1"],
+      collection_id: "col_1",
+    })
   })
 })
